@@ -1,120 +1,32 @@
 // my-equipment-booking-backend/db.js
-const mysql = require('mysql2/promise'); // 使用 promise 版本
-const dotenv = require('dotenv');
+const mysql = require('mysql2/promise');
 
-dotenv.config(); // 加载 .env 文件
-
-// 1. 创建数据库连接池 (推荐做法，比单个连接更高效)
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  charset: 'utf8mb4'
-});
-
-// 2. 测试数据库连接
-(async () => {
-  try {
-    const connection = await pool.getConnection();
-    console.log('[DB] 已连接到 MySQL 数据库:', process.env.DB_NAME);
-    connection.release(); // 释放连接回池中
-  } catch (err) {
-    console.error('[DB] 连接 MySQL 数据库失败:', err.message);
-    process.exit(1); // 如果数据库连接失败，退出程序
-  }
-})();
-
-// 3. 初始化数据库表
-const initializeDatabase = async () => {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-
-    // 创建用户表
-    const createUsersTable = `
-      CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role ENUM('admin', 'user') DEFAULT 'user',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `;
-    await connection.execute(createUsersTable);
-    console.log('[DB] Users 表已创建或已存在。');
-
-    // （可选）插入默认管理员用户
-    // 注意：密码 'admin123' 需要被加密后存储。这里只是一个占位符，实际应在注册时加密。
-    // 我们将在后端注册逻辑中处理加密。
-    const checkAdminQuery = `SELECT id FROM users WHERE username = 'admin'`;
-    const [rows] = await connection.execute(checkAdminQuery);
-    
-    if (rows.length === 0) {
-      // 注意：这里不应该直接插入明文密码，这只是为了演示表结构。
-      // 正确的做法是在应用中提供注册功能，或使用脚本安全地插入加密后的密码。
-      // 为了让你能快速测试，我们先插入一个占位符，后续你会在注册时用正确的密码。
-      const insertAdminQuery = `
-        INSERT INTO users (username, password_hash, role) 
-        VALUES ('admin', 'placeholder_for_hashed_admin_password', 'admin')
-      `;
-      await connection.execute(insertAdminQuery);
-      console.log('[DB] 默认管理员用户 "admin" 已创建 (密码需后续设置)。');
-    } else {
-       console.log('[DB] 默认管理员用户 "admin" 已存在。');
-    }
-
-
-    // --- 你可以在这里继续创建其他表，如设备表、预约表 ---
-    // 创建设备表
-    const createEquipmentsTable = `
-      CREATE TABLE IF NOT EXISTS equipments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        description TEXT,
-        status ENUM('available', 'maintenance') DEFAULT 'available',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `;
-    await connection.execute(createEquipmentsTable);
-    console.log('[DB] Equipments 表已创建或已存在。');
-
-    // 创建预约表
-    const createBookingsTable = `
-      CREATE TABLE IF NOT EXISTS bookings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        equipment_id INT NOT NULL,
-        date DATE NOT NULL,
-        time_slot VARCHAR(50) NOT NULL,
-        status ENUM('pending', 'approved', 'rejected', 'cancelled') DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (equipment_id) REFERENCES equipments(id) ON DELETE CASCADE,
-        INDEX idx_user_id (user_id),
-        INDEX idx_equipment_id (equipment_id),
-        INDEX idx_date (date)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `;
-    await connection.execute(createBookingsTable);
-    console.log('[DB] Bookings 表已创建或已存在。');
-
-
-  } catch (err) {
-    console.error('[DB] 初始化数据库表时出错:', err.message);
-    if (connection) connection.release();
-    process.exit(1);
-  } finally {
-    if (connection) connection.release();
-  }
+// --- Railway 兼容配置 ---
+// Railway 提供的 MySQL 环境变量 (注意变量名)
+const railwayDbConfig = {
+    host: process.env.MYSQLHOST,           // 注意是 MYSQLHOST
+    user: process.env.MYSQLUSER,           // 注意是 MYSQLUSER
+    password: process.env.MYSQLPASSWORD,   // 注意是 MYSQLPASSWORD
+    database: process.env.MYSQLDATABASE,   // 注意是 MYSQLDATABASE
+    port: process.env.MYSQLPORT ? parseInt(process.env.MYSQLPORT, 10) : 3306, // 注意是 MYSQLPORT
 };
 
-// 在服务器启动时调用初始化函数
-initializeDatabase();
+// 本地开发环境变量 (如果 Railway 变量不存在则使用这些)
+const localDbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'your_app_user', // 你本地的用户名
+    password: process.env.DB_PASSWORD || 'your_password', // 你本地的密码
+    database: process.env.DB_NAME || 'equipment_booking_db',
+    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
+};
 
-// 4. 导出连接池，供其他模块使用
+// 选择配置：优先使用 Railway 的变量，否则使用本地的
+// 关键在于判断 railwayDbConfig.host 是否存在且非空
+const dbConfig = (railwayDbConfig.host && railwayDbConfig.host !== '') ? railwayDbConfig : localDbConfig;
+
+console.log('[数据库] 尝试连接到:', dbConfig.host, dbConfig.database); // 日志确认使用了哪个配置
+
+// 创建连接池
+const pool = mysql.createPool(dbConfig);
+
 module.exports = pool;
