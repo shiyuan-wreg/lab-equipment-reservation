@@ -1,10 +1,10 @@
 const mysql = require("mysql2/promise");
 
-// Railway 新界面：数据库连接字符串
-const url = process.env.MYSQL_URL || process.env.MYSQLURL || process.env.DATABASE_URL;
+// 必须使用 PUBLIC URL，否则 root 权限不允许内部连接
+const url = process.env.MYSQL_PUBLIC_URL;
 
 if (!url) {
-    console.error("❌ 没有找到 Railway 的数据库 URL，请检查服务 Variables");
+    console.error("❌ MYSQL_PUBLIC_URL 未找到，请检查 Railway Variables");
     process.exit(1);
 }
 
