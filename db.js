@@ -3,11 +3,13 @@ const mysql = require('mysql2/promise');
 
 // --- 优先使用 Railway 提供的环境变量 (通常是大写且带下划线) ---
 // 如果这些变量在 Railway 上存在，它们会覆盖 .env 中的 DB_* 变量
-const railwayHost = process.env.MYSQL_HOST; // Railway 注入的标准变量名
-const railwayUser = process.env.MYSQL_USER;
-const railwayPassword = process.env.MYSQL_PASSWORD;
-const railwayDatabase = process.env.MYSQL_DATABASE;
-const railwayPort = process.env.MYSQL_PORT;
+import mysql from "mysql2/promise";
+
+const db = await mysql.createPool({
+    uri: process.env.MYSQL_PUBLIC_URL
+});
+
+export default db;
 
 let dbConfig;
 
