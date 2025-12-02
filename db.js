@@ -11,7 +11,15 @@ let dbConfig;
 
 // 优先使用 Railway 注入的 MYSQL_URL
 const railwayDbUrl = process.env.MYSQL_URL; 
+console.log('--- 环境变量调试 ---');
+console.log('PORT:', process.env.PORT);
+console.log('MYSQL_URL 存在性:', !!process.env.MYSQL_URL); 
+console.log('MYSQL_URL 长度:', process.env.MYSQL_URL ? process.env.MYSQL_URL.length : 'N/A');
+console.log('--------------------');
 
+
+const express = require('express');
+const { pool, testConnection } = require('./db');
 if (railwayDbUrl) { 
     console.log('[数据库] 检测到平台数据库 URL，进行手动解析...');
     
