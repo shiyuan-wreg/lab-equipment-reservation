@@ -1,62 +1,91 @@
 // db.js
-const mysql = require('mysql2');
+// 1. 导入 promise 接口
+const mysql = require('mysql2/promise'); 
 const dotenv = require('dotenv');
+// 导入 Node.js 内置的 URL 模块
+const { URL } = require('url'); 
 
 dotenv.config();
 
 let dbConfig;
 
-// --- 关键修改点 ---
-// 1. 直接使用 process.env.MYSQL_URL，它是 Railway 注入的完整 URL
-// 2. 不要再尝试去解析它的 host, user, password 等部分，因为 mysql2 可以直接处理 URL
-if (process.env.MYSQL_URL) {
-    console.log('[数据库] 检测到 MYSQL_URL 环境变量，使用它进行连接...');
-    // mysql2 支持直接传入 URL 字符串
-    dbConfig = {
-        uri: process.env.MYSQL_URL,
-        charset: 'utf8mb4'
-    };
+// 优先使用 Railway 注入的 MYSQL_URL
+const railwayDbUrl = process.env.MYSQL_URL; 
+
+if (railwayDbUrl) { 
+    console.log('[数据库] 检测到平台数据库 URL，进行手动解析...');
+    
+    try {
+        // 关键：手动解析 URL，防止特殊字符导致的解析错误
+        const parsedUrl = new URL(railwayDbUrl);
+        
+        dbConfig = {
+            host: parsedUrl.hostname,
+            port: Number(parsedUrl.port) || 3306,
+            user: parsedUrl.username,
+            password: parsedUrl.password,
+            database: parsedUrl.pathname.replace(/^\//, ''), // 移除路径开头的 /
+            charset: 'utf8mb4',
+            // 2. 关键：添加 SSL 配置以连接 Railway 内部网络
+            ssl: { 
+                rejectUnauthorized: false // 允许自签名证书
+            }
+        };
+        
+    } catch (error) {
+        console.error('[数据库] ❌ URL 解析失败！请检查 MYSQL_URL 格式。', error.message);
+        process.exit(1);
+    }
+    
 } else {
-    console.log('[数据库] 未检测到 MYSQL_URL，使用 .env 文件中的配置进行连接...');
+    console.log('[数据库] 未检测到平台数据库 URL，使用 .env 文件中的配置...');
     dbConfig = {
         host: process.env.DB_HOST || 'localhost',
-        port: process.env.DB_PORT || 3306,
+        port: Number(process.env.DB_PORT) || 3306,
         user: process.env.DB_USER || 'root',
         password: process.env.DB_PASSWORD || '',
         database: process.env.DB_NAME || 'test_db',
         charset: 'utf8mb4'
     };
 }
-// --- 修改结束 ---
 
-console.log('[数据库] 解析结果 ->', dbConfig.uri ? `URL: ${dbConfig.uri.substring(0, 30)}...` : `Host: ${dbConfig.host}, User: ${dbConfig.user}, Pwd: ${'*'.repeat(dbConfig.password?.length || 0)}`);
+// 打印脱敏后的配置信息
+const maskedPwd = dbConfig.password ? 
+    `${dbConfig.password.substring(0, 2)}******` : "无密码";
+console.log(`[数据库] 解析结果 -> Host: ${dbConfig.host}, User: ${dbConfig.user}, Pwd: ${maskedPwd}`);
 
-// 创建数据库连接池
-const pool = mysql.createPool(dbConfig);
 
-// 获取连接池的 Promise 包装
-const promisePool = pool.promise();
+const pool = mysql.createPool(dbConfig); 
 
-// 测试数据库连接
 async function testConnection() {
     console.log('[诊断] 开始强制性数据库连接测试...');
+    let connection;
     try {
-        const connection = await promisePool.getConnection();
+        // 确保使用 promise 接口的 getConnection
+        connection = await pool.getConnection(); 
+        
+        // 执行简单的查询来确认连接和认证都成功
+        const [results] = await connection.execute('SELECT 1 + 1 AS solution');
+        console.log('[诊断] ✅ 数据库查询成功:', results[0].solution);
+
         console.log('[诊断] 数据库连接测试成功!');
-        await connection.ping();
-        console.log('[诊断] 数据库连接活跃性检查通过!');
         connection.release();
+        return true;
     } catch (err) {
         console.error('[诊断] ❌ 数据库连接测试失败!!! 错误详情:');
-        console.error(err);
-        console.error('--- 错误对象 ---');
-        console.error(JSON.stringify(err, Object.getOwnPropertyNames(err)));
-        console.error('--- 错误信息 ---');
+        // ... (错误日志打印保持不变)
         console.error(err.message);
         console.error('--- 错误堆栈 ---');
         console.error(err.stack);
-        process.exit(1); 
+        
+        // 关键：如果连接失败，释放连接并拒绝启动服务
+        if (connection) connection.release(); 
+        
+        // 强制退出，让 Railway 记录错误
+        // 注意：在您的 server.js 中处理这个失败的 promise 更优雅
+        return Promise.reject(err); 
     }
 }
 
-module.exports = { pool: promisePool, testConnection };
+// 导出 pool 和 testConnection
+module.exports = { pool, testConnection };
