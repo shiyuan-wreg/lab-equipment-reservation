@@ -1,36 +1,52 @@
 // db.js
 const mysql = require("mysql2/promise");
-require('dotenv').config(); // 确保加载本地 .env
+require('dotenv').config();
 
-let pool;
+let poolConfig = {
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    // Railway 内部连接通常需要 SSL，但我们要允许自签名证书
+    ssl: {
+        rejectUnauthorized: false
+    }
+};
 
-// 优先检查是否有完整的连接字符串 (Railway 模式)
-if (process.env.MYSQL_URL) {
-    console.log("[Database] 检测到 MYSQL_URL，使用连接字符串模式...");
-    pool = mysql.createPool({
-        uri: process.env.MYSQL_URL,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0,
-        ssl: { rejectUnauthorized: false } // 解决 Railway 内部连接可能的 SSL 问题
-    });
-} 
-// 如果没有 URL，则检查分散的变量 (本地开发模式)
-else if (process.env.DB_HOST) {
-    console.log("[Database] 未检测到 MYSQL_URL，使用本地独立变量模式...");
-    pool = mysql.createPool({
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME,
-        port: process.env.DB_PORT || 3306,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0
-    });
-} else {
-    console.error("❌ [Database] 致命错误: 未找到任何数据库配置变量！");
+try {
+    if (process.env.MYSQL_URL) {
+        console.log("[Database] 正在使用 Railway MYSQL_URL...");
+        
+        // 关键修改：手动解析 URL，防止密码中的特殊字符导致解析失败
+        const dbUrl = new URL(process.env.MYSQL_URL);
+        
+        poolConfig.host = dbUrl.hostname;
+        poolConfig.user = dbUrl.username;
+        poolConfig.password = dbUrl.password;
+        poolConfig.database = dbUrl.pathname.replace(/^\//, ''); // 去掉开头的 /
+        poolConfig.port = Number(dbUrl.port) || 3306;
+
+        // 安全打印调试信息 (只显示密码前2位)
+        const maskedPwd = poolConfig.password ? 
+            `${poolConfig.password.substring(0, 2)}******` : "无密码";
+            
+        console.log(`[Database] 解析结果 -> Host: ${poolConfig.host}, User: ${poolConfig.user}, Pwd: ${maskedPwd}`);
+        
+    } else if (process.env.DB_HOST) {
+        console.log("[Database] 正在使用本地 .env 变量...");
+        poolConfig.host = process.env.DB_HOST;
+        poolConfig.user = process.env.DB_USER;
+        poolConfig.password = process.env.DB_PASSWORD;
+        poolConfig.database = process.env.DB_NAME;
+        poolConfig.port = process.env.DB_PORT || 3306;
+    } else {
+        throw new Error("未找到任何数据库配置 (MYSQL_URL 或 DB_HOST)");
+    }
+
+    // 创建连接池
+    const pool = mysql.createPool(poolConfig);
+    module.exports = pool;
+
+} catch (err) {
+    console.error("❌ [Database] 配置初始化失败:", err.message);
     process.exit(1);
 }
-
-module.exports = pool;
