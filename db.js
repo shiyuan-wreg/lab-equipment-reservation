@@ -1,52 +1,62 @@
 // db.js
-const mysql = require("mysql2/promise");
-require('dotenv').config();
+const mysql = require('mysql2');
+const dotenv = require('dotenv');
 
-let poolConfig = {
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    // Railway 内部连接通常需要 SSL，但我们要允许自签名证书
-    ssl: {
-        rejectUnauthorized: false
-    }
-};
+dotenv.config(); // 加载 .env 文件 (本地开发时有用)
 
-try {
-    if (process.env.MYSQL_URL) {
-        console.log("[Database] 正在使用 Railway MYSQL_URL...");
-        
-        // 关键修改：手动解析 URL，防止密码中的特殊字符导致解析失败
-        const dbUrl = new URL(process.env.MYSQL_URL);
-        
-        poolConfig.host = dbUrl.hostname;
-        poolConfig.user = dbUrl.username;
-        poolConfig.password = dbUrl.password;
-        poolConfig.database = dbUrl.pathname.replace(/^\//, ''); // 去掉开头的 /
-        poolConfig.port = Number(dbUrl.port) || 3306;
+let dbConfig;
 
-        // 安全打印调试信息 (只显示密码前2位)
-        const maskedPwd = poolConfig.password ? 
-            `${poolConfig.password.substring(0, 2)}******` : "无密码";
-            
-        console.log(`[Database] 解析结果 -> Host: ${poolConfig.host}, User: ${poolConfig.user}, Pwd: ${maskedPwd}`);
-        
-    } else if (process.env.DB_HOST) {
-        console.log("[Database] 正在使用本地 .env 变量...");
-        poolConfig.host = process.env.DB_HOST;
-        poolConfig.user = process.env.DB_USER;
-        poolConfig.password = process.env.DB_PASSWORD;
-        poolConfig.database = process.env.DB_NAME;
-        poolConfig.port = process.env.DB_PORT || 3306;
-    } else {
-        throw new Error("未找到任何数据库配置 (MYSQL_URL 或 DB_HOST)");
-    }
-
-    // 创建连接池
-    const pool = mysql.createPool(poolConfig);
-    module.exports = pool;
-
-} catch (err) {
-    console.error("❌ [Database] 配置初始化失败:", err.message);
-    process.exit(1);
+// --- 关键修改：优先使用 Railway 提供的 MYSQL_URL ---
+if (process.env.MYSQL_URL || process.env.DATABASE_URL) {
+    console.log('[数据库] 检测到 MYSQL_URL 或 DATABASE_URL 环境变量，使用它进行连接...');
+    // mysql2 可以直接接受 URL 形式的连接字符串
+    dbConfig = {
+        uri: process.env.MYSQL_URL || process.env.DATABASE_URL,
+        charset: 'utf8mb4'
+    };
+} else {
+    // 如果没有 MYSQL_URL，则回退到 .env 文件中的配置 (主要用于本地开发)
+    console.log('[数据库] 未检测到 MYSQL_URL，使用 .env 文件中的配置进行连接...');
+    dbConfig = {
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 3306,
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        database: process.env.DB_NAME || 'test_db',
+        charset: 'utf8mb4'
+    };
 }
+// --- 修改结束 ---
+
+console.log('[数据库] 解析结果 ->', dbConfig.uri ? `URL: ${dbConfig.uri.substring(0, 30)}...` : `Host: ${dbConfig.host}, User: ${dbConfig.user}, Pwd: ${'*'.repeat(dbConfig.password?.length || 0)}`);
+
+// 创建数据库连接池
+const pool = mysql.createPool(dbConfig);
+
+// 获取连接池的 Promise 包装
+const promisePool = pool.promise();
+
+// 测试数据库连接
+async function testConnection() {
+    console.log('[诊断] 开始强制性数据库连接测试...');
+    try {
+        const connection = await promisePool.getConnection();
+        console.log('[诊断] 数据库连接测试成功!');
+        await connection.ping(); // 发送 ping 命令确认连接活跃
+        console.log('[诊断] 数据库连接活跃性检查通过!');
+        connection.release(); // 将连接释放回池中
+    } catch (err) {
+        console.error('[诊断] ❌ 数据库连接测试失败!!! 错误详情:');
+        console.error(err);
+        console.error('--- 错误对象 ---');
+        console.error(JSON.stringify(err, Object.getOwnPropertyNames(err))); // 更详细地打印错误对象
+        console.error('--- 错误信息 ---');
+        console.error(err.message);
+        console.error('--- 错误堆栈 ---');
+        console.error(err.stack);
+        // 重要：如果数据库连接失败，应用不应该继续启动
+        process.exit(1); 
+    }
+}
+
+module.exports = { pool: promisePool, testConnection };
