@@ -178,54 +178,5 @@ app.delete('/api/bookings/:id', async (req, res) => {
   }
 });
 // --- 新增：用户认证路由 ---
-// 用户登录
-app.post('/api/auth/login', async (req, res) => {
-  console.log('[API] POST /api/auth/login - 收到登录请求', req.body);
-  const { username, password } = req.body;
 
-  if (!username || !password) {
-      console.warn('[API] POST /api/auth/login - 缺少用户名或密码');
-      return res.status(400).json({ message: '用户名和密码不能为空' });
-  }
-
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    const [rows] = await connection.execute(
-      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
-      [username]
-    );
-
-    if (rows.length === 0) {
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-
-    const user = rows[0];
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!isMatch) {
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-
-    const userInfo = {
-      id: user.id,
-      username: user.username,
-      role: user.role
-    };
-    const fakeToken = `fake-jwt-token-for-${user.username}-${Date.now()}`;
-
-    res.json({
-      message: '登录成功',
-      user: userInfo,
-      token: fakeToken
-    });
-
-  } catch (err) {
-    console.error("[API] POST /api/auth/login - 登录过程出错:", err);
-    res.status(500).json({ message: '服务器内部错误' });
-  } finally {
-    if (connection) connection.release();
-  }
-});
 startServer();
