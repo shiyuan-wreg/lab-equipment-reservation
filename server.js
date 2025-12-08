@@ -12,7 +12,14 @@ app.use(cors());
 app.use(express.json());
 
 // --- API 路由 ---
+const equipmentRoutes = require('./routes/equipment');
+const bookingRoutes = require('./routes/booking');
+const authRoutes = require('./routes/auth');
 
+//挂载路由
+app.use('/api/equipments', equipmentRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/auth', authRoutes); 
 
 // 1. 获取所有设备 (已完成数据库改造)
 app.get('/api/equipments', async (req, res) => {
