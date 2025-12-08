@@ -1,7 +1,6 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs'); 
 const { pool, testConnection } = require('./db'); // 导入数据库连接池和测试函数
 
 const app = express();
@@ -12,14 +11,6 @@ app.use(cors());
 app.use(express.json());
 
 // --- API 路由 ---
-const equipmentRoutes = require('./routes/equipment');
-const bookingRoutes = require('./routes/booking');
-const authRoutes = require('./routes/auth');
-
-//挂载路由
-app.use('/api/equipments', equipmentRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/auth', authRoutes); 
 
 // 1. 获取所有设备 (已完成数据库改造)
 app.get('/api/equipments', async (req, res) => {
@@ -177,6 +168,42 @@ app.delete('/api/bookings/:id', async (req, res) => {
     }
   }
 });
-// --- 新增：用户认证路由 ---
+
+// --- 健康检查/根路径 ---
+app.get('/', (req, res) => {
+  res.json({ message: '欢迎使用实验室设备预订系统 API!', timestamp: new Date().toISOString() });
+});
+
+// --- 启动服务器 ---
+async function startServer() {
+  console.log('[服务器] 开始启动流程...');
+  
+  try {
+    console.log('[服务器] 正在执行数据库连接健康检查...');
+    const isConnected = await testConnection(); 
+    
+    if (isConnected) {
+        console.log('[服务器] ✅ 数据库连接健康检查通过!');
+        
+        const server = app.listen(PORT, '0.0.0.0', () => {
+          console.log(`[服务器] 🚀 后端服务已成功启动并监听端口 ${PORT}`);
+          console.log(`[服务器] 🌐 本地测试地址: http://localhost:${PORT}`);
+        });
+
+        server.on('error', (err) => {
+          console.error('[服务器] ❌ Express 服务器启动失败:', err);
+          process.exit(1);
+        });
+
+    } else {
+        console.error('[服务器] ❌ 数据库连接健康检查未通过，服务器启动终止。');
+        process.exit(1);
+    }
+
+  } catch (dbErr) {
+    console.error('[服务器] ❌ 数据库连接健康检查失败，服务器启动终止。', dbErr.message);
+    process.exit(1);
+  }
+}
 
 startServer();
