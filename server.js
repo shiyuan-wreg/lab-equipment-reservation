@@ -12,74 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 // --- API 路由 ---
-// 用户登录
-app.post('/api/auth/login', async (req, res) => {
-  console.log('[API] POST /api/auth/login - 收到登录请求', req.body);
-  const { username, password } = req.body;
 
-  // 1. 基本验证
-  if (!username || !password) {
-      console.warn('[API] POST /api/auth/login - 缺少用户名或密码');
-      return res.status(400).json({ message: '用户名和密码不能为空' });
-  }
-
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    // 2. 查询用户 (假设 users 表中有 username, password_hash, role 字段)
-    const [rows] = await connection.execute(
-      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
-      [username]
-    );
-
-    // 3. 检查用户是否存在
-    if (rows.length === 0) {
-      console.log(`[API] POST /api/auth/login - 用户 '${username}' 不存在`);
-      // 出于安全考虑，不要明确告诉用户是用户名还是密码错了
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-
-    const user = rows[0];
-    console.log(`[API] POST /api/auth/login - 找到用户 '${username}', 开始验证密码...`);
-
-    // 4. 验证密码 (使用 bcrypt.compare)
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!isMatch) {
-      console.log(`[API] POST /api/auth/login - 用户 '${username}' 密码验证失败`);
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-
-    console.log(`[API] POST /api/auth/login - 用户 '${username}' 登录成功`);
-    
-    // 5. 登录成功，返回用户信息（不含密码哈希）和模拟的 token
-    // 注意：这里应该生成一个真正的 JWT token，但现在我们先返回用户信息表示成功
-    const userInfo = {
-      id: user.id,
-      username: user.username,
-      role: user.role // 'admin' 或 'user'
-    };
-
-    // TODO: 未来这里用 jwt.sign 生成真正的 token
-    const fakeToken = `fake-jwt-token-for-${user.username}-${Date.now()}`;
-
-    res.json({
-      message: '登录成功',
-      user: userInfo,
-      token: fakeToken // 先用假 token 占位
-    });
-
-  } catch (err) {
-    console.error("[API] POST /api/auth/login - 登录过程出错:", err);
-    res.status(500).json({ message: '服务器内部错误' });
-  } finally {
-    if (connection) {
-      connection.release();
-      console.log('[API] POST /api/auth/login - 数据库连接已释放');
-    }
-  }
-});
 
 // 1. 获取所有设备 (已完成数据库改造)
 app.get('/api/equipments', async (req, res) => {
@@ -238,6 +171,74 @@ app.delete('/api/bookings/:id', async (req, res) => {
   }
 });
 
+// 用户登录
+app.post('/api/auth/login', async (req, res) => {
+  console.log('[API] POST /api/auth/login - 收到登录请求', req.body);
+  const { username, password } = req.body;
+
+  // 1. 基本验证
+  if (!username || !password) {
+      console.warn('[API] POST /api/auth/login - 缺少用户名或密码');
+      return res.status(400).json({ message: '用户名和密码不能为空' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    
+    // 2. 查询用户 (假设 users 表中有 username, password_hash, role 字段)
+    const [rows] = await connection.execute(
+      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
+      [username]
+    );
+
+    // 3. 检查用户是否存在
+    if (rows.length === 0) {
+      console.log(`[API] POST /api/auth/login - 用户 '${username}' 不存在`);
+      // 出于安全考虑，不要明确告诉用户是用户名还是密码错了
+      return res.status(401).json({ message: '用户名或密码错误' });
+    }
+
+    const user = rows[0];
+    console.log(`[API] POST /api/auth/login - 找到用户 '${username}', 开始验证密码...`);
+
+    // 4. 验证密码 (使用 bcrypt.compare)
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!isMatch) {
+      console.log(`[API] POST /api/auth/login - 用户 '${username}' 密码验证失败`);
+      return res.status(401).json({ message: '用户名或密码错误' });
+    }
+
+    console.log(`[API] POST /api/auth/login - 用户 '${username}' 登录成功`);
+    
+    // 5. 登录成功，返回用户信息（不含密码哈希）和模拟的 token
+    // 注意：这里应该生成一个真正的 JWT token，但现在我们先返回用户信息表示成功
+    const userInfo = {  
+      id: user.id,
+      username: user.username,
+      role: user.role // 'admin' 或 'user'
+    };
+
+    // TODO: 未来这里用 jwt.sign 生成真正的 token
+    const fakeToken = `fake-jwt-token-for-${user.username}-${Date.now()}`;
+
+    res.json({
+      message: '登录成功',
+      user: userInfo,
+      token: fakeToken // 先用假 token 占位
+    });
+
+  } catch (err) {
+    console.error("[API] POST /api/auth/login - 登录过程出错:", err);
+    res.status(500).json({ message: '服务器内部错误' });
+  } finally {
+    if (connection) {
+      connection.release();
+      console.log('[API] POST /api/auth/login - 数据库连接已释放');
+    }
+  }
+});
 // --- 健康检查/根路径 ---
 app.get('/', (req, res) => {
   res.json({ message: '欢迎使用实验室设备预订系统 API!', timestamp: new Date().toISOString() });
