@@ -1,6 +1,8 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+
 const { pool, testConnection } = require('./db'); // 导入数据库连接池和测试函数
 
 const app = express();
@@ -168,6 +170,50 @@ app.delete('/api/bookings/:id', async (req, res) => {
     }
   }
 });
+
+// --- 新增：用户登录接口 ---
+app.post('/api/auth/login', async (req, res) => {
+  console.log('[API] POST /api/auth/login - 收到登录请求');
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ message: '用户名和密码不能为空' });
+  }
+
+  try {
+    // 查询 users 表（假设存在）
+    const [rows] = await pool.execute(
+      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
+      [username]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ message: '用户名或密码错误' });
+    }
+
+    const user = rows[0];
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: '用户名或密码错误' });
+    }
+
+    // 登录成功：返回用户信息（不含密码）
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      }
+    });
+
+  } catch (err) {
+    console.error('[API] /api/auth/login - 内部错误:', err);
+    res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+// --- 登录接口结束 ---
 
 // --- 健康检查/根路径 ---
 app.get('/', (req, res) => {
