@@ -27,6 +27,99 @@ app.get('/api/equipments', async (req, res) => {
   }
 });
 
+
+//管理员创建新设备
+app.post('/api/equipments', async (req, res) => {
+  console.log('[API] POST /api/equipments - 收到创建设备请求');
+  const { name, description } = req.body;
+
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ message: '设备名称不能为空' });
+  }
+
+  try {
+    const [result] = await pool.execute(
+      'INSERT INTO equipments (name, description, status) VALUES (?, ?, ?)',
+      [name.trim(), description || '', 'available']
+    );
+    
+    const newEquipment = {
+      id: result.insertId,
+      name: name.trim(),
+      description: description || '',
+      status: 'available'
+    };
+    
+    console.log(`[API] 设备创建成功:`, newEquipment);
+    res.status(201).json(newEquipment);
+  } catch (err) {
+    console.error('[API] 创建设备失败:', err);
+    res.status(500).json({ message: '服务器内部错误，无法创建设备' });
+  }
+});
+
+// 3. 更新设备信息
+app.put('/api/equipments/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, description, status } = req.body;
+
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ message: '设备名称不能为空' });
+  }
+
+  // 验证 status 是否合法
+  const validStatuses = ['available', 'booked', 'maintenance'];
+  if (status && !validStatuses.includes(status)) {
+    return res.status(400).json({ message: '设备状态无效' });
+  }
+
+  try {
+    const [result] = await pool.execute(
+      'UPDATE equipments SET name = ?, description = ?, status = ? WHERE id = ?',
+      [name.trim(), description || '', status || 'available', id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: '设备未找到' });
+    }
+
+    console.log(`[API] 设备 ID ${id} 更新成功`);
+    res.json({ message: '设备更新成功' });
+  } catch (err) {
+    console.error(`[API] 更新设备 ID ${id} 失败:`, err);
+    res.status(500).json({ message: '服务器内部错误，无法更新设备' });
+  }
+});
+
+// 4. 删除设备
+app.delete('/api/equipments/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 检查是否有未取消的预订（可选但推荐）
+    const [bookingRows] = await pool.execute(
+      'SELECT id FROM bookings WHERE equipment_id = ? AND status != "cancelled"',
+      [id]
+    );
+
+    if (bookingRows.length > 0) {
+      return res.status(400).json({ message: '该设备有未取消的预订，无法删除' });
+    }
+
+    const [result] = await pool.execute('DELETE FROM equipments WHERE id = ?', [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: '设备未找到' });
+    }
+
+    console.log(`[API] 设备 ID ${id} 删除成功`);
+    res.json({ message: '设备删除成功' });
+  } catch (err) {
+    console.error(`[API] 删除设备 ID ${id} 失败:`, err);
+    res.status(500).json({ message: '服务器内部错误，无法删除设备' });
+  }
+});
+
 // 2. 创建预订 (已完成数据库改造，包含事务)
 app.post('/api/bookings', async (req, res) => {
   console.log('[API] /api/bookings - 收到预订请求', req.body);
@@ -214,6 +307,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 // --- 登录接口结束 ---
+
 
 // --- 健康检查/根路径 ---
 app.get('/', (req, res) => {
