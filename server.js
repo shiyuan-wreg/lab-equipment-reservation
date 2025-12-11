@@ -96,14 +96,16 @@ app.delete('/api/equipments/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    // 检查是否有未取消的预订（可选但推荐）
+    // 检查 bookings 表中是否存在该 equipment_id 的任何记录
     const [bookingRows] = await pool.execute(
-      'SELECT id FROM bookings WHERE equipment_id = ? AND status != "cancelled"',
+      'SELECT id FROM bookings WHERE equipment_id = ?',
       [id]
     );
 
     if (bookingRows.length > 0) {
-      return res.status(400).json({ message: '该设备有未取消的预订，无法删除' });
+      return res.status(400).json({ 
+        message: '该设备存在预订记录，无法删除。如需删除，请先清除相关预订。' 
+      });
     }
 
     const [result] = await pool.execute('DELETE FROM equipments WHERE id = ?', [id]);
@@ -112,11 +114,10 @@ app.delete('/api/equipments/:id', async (req, res) => {
       return res.status(404).json({ message: '设备未找到' });
     }
 
-    console.log(`[API] 设备 ID ${id} 删除成功`);
     res.json({ message: '设备删除成功' });
   } catch (err) {
-    console.error(`[API] 删除设备 ID ${id} 失败:`, err);
-    res.status(500).json({ message: '服务器内部错误，无法删除设备' });
+    console.error(`[API] DELETE /api/equipments/${id} - 删除失败:`, err);
+    res.status(500).json({ message: '服务器内部错误' });
   }
 });
 
