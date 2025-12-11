@@ -189,8 +189,7 @@ app.post('/api/bookings', async (req, res) => {
   }
 });
 
-// 3. 获取所有预订 (新增数据库支持)
-// --- 获取预订列表（支持按 user_id 过滤）---
+// --- 获取预订列表（支持按 user_id 过滤，并关联设备名）---
 app.get('/api/bookings', async (req, res) => {
   console.log('[API] GET /api/bookings - 查询参数:', req.query);
   
@@ -199,30 +198,38 @@ app.get('/api/bookings', async (req, res) => {
     let params = [];
 
     if (req.query.user_id) {
-      // 只允许查询自己的预订（简单防护）
       const userId = parseInt(req.query.user_id, 10);
       if (isNaN(userId)) {
         return res.status(400).json({ message: '无效的用户ID' });
       }
+      // 只查询当前用户的预订，并关联设备名称
       query = `
-        SELECT b.id, b.equipment_id, b.start_time, b.end_time, b.purpose, 
-               e.name AS equipment_name, u.username AS user_name
+        SELECT 
+          b.id,
+          b.equipment_id,
+          b.booking_date,
+          b.created_at,
+          e.name AS equipment_name
         FROM bookings b
         JOIN equipments e ON b.equipment_id = e.id
-        JOIN users u ON b.user_id = u.id
         WHERE b.user_id = ?
-        ORDER BY b.start_time DESC
+        ORDER BY b.booking_date DESC, b.created_at DESC
       `;
       params = [userId];
     } else {
-      // 管理员查看所有（未来可加权限判断）
+      // 无 user_id 参数时，返回所有（供管理员用，未来可加权限）
       query = `
-        SELECT b.id, b.equipment_id, b.start_time, b.end_time, b.purpose,
-               e.name AS equipment_name, u.username AS user_name
+        SELECT 
+          b.id,
+          b.equipment_id,
+          b.booking_date,
+          b.created_at,
+          e.name AS equipment_name,
+          u.username AS user_name
         FROM bookings b
         JOIN equipments e ON b.equipment_id = e.id
         JOIN users u ON b.user_id = u.id
-        ORDER BY b.start_time DESC
+        ORDER BY b.booking_date DESC
       `;
     }
 
@@ -234,62 +241,48 @@ app.get('/api/bookings', async (req, res) => {
   }
 });
 
-// 4. 取消预订 (新增数据库支持)
+// --- 取消预订 ---
 app.delete('/api/bookings/:id', async (req, res) => {
-  const bookingId = req.params.id;
-  console.log(`[API] DELETE /api/bookings/${bookingId} - 请求取消预订`);
-
-  if (!bookingId) {
-     console.warn('[API] DELETE /api/bookings/:id - 缺少预订ID参数');
-     return res.status(400).json({ message: '缺少预订ID参数' });
+  const bookingId = parseInt(req.params.id, 10);
+  if (isNaN(bookingId)) {
+    return res.status(400).json({ message: '无效的预约ID' });
   }
 
   let connection;
   try {
     connection = await pool.getConnection();
-    console.log('[API] DELETE /api/bookings/:id - 已获取数据库连接');
-
     await connection.beginTransaction();
-    console.log('[API] DELETE /api/bookings/:id - 开启数据库事务');
 
-    // a. 查找预订记录并获取关联的设备ID
-    const [bookingRows] = await connection.execute(
-      'SELECT equipment_id FROM bookings WHERE id = ?', [bookingId]
+    // a. 检查该预订是否存在
+    const [bookings] = await connection.execute(
+      'SELECT equipment_id FROM bookings WHERE id = ?',
+      [bookingId]
     );
-
-    if (bookingRows.length === 0) {
+    if (bookings.length === 0) {
       await connection.rollback();
-      console.log(`[API] DELETE /api/bookings/${bookingId} - 预订记录不存在，事务回滚`);
-      return res.status(404).json({ message: '预订记录不存在' });
+      return res.status(404).json({ message: '预约记录不存在' });
     }
 
-    const equipmentId = bookingRows[0].equipment_id;
+    const equipmentId = bookings[0].equipment_id;
 
     // b. 删除预订记录
     await connection.execute('DELETE FROM bookings WHERE id = ?', [bookingId]);
-    console.log(`[API] DELETE /api/bookings/${bookingId} - 预订记录删除成功`);
 
-    // c. 更新设备状态为 available
-    await connection.execute('UPDATE equipments SET status = "available" WHERE id = ?', [equipmentId]);
-    console.log(`[API] DELETE /api/bookings/${bookingId} - 设备 ID ${equipmentId} 状态更新为 available`);
+    // c. 将设备状态改回 available（注意：这可能不准确！见下方说明）
+    await connection.execute(
+      'UPDATE equipments SET status = "available" WHERE id = ?',
+      [equipmentId]
+    );
 
     await connection.commit();
-    console.log('[API] DELETE /api/bookings/:id - 数据库事务提交成功');
-
-    res.status(200).json({ message: '取消预订成功' });
+    res.json({ message: '预约已取消' });
 
   } catch (err) {
-     if (connection) {
-      await connection.rollback();
-      console.log('[API] DELETE /api/bookings/:id - 发生错误，事务已回滚');
-    }
-    console.error(`[API] DELETE /api/bookings/${bookingId} - 取消预订失败:`, err);
-    res.status(500).json({ message: '服务器内部错误，取消预订失败' });
+    if (connection) await connection.rollback();
+    console.error('[API] DELETE /api/bookings/:id 失败:', err);
+    res.status(500).json({ message: '取消失败' });
   } finally {
-    if (connection) {
-      connection.release();
-      console.log('[API] DELETE /api/bookings/:id - 数据库连接已释放');
-    }
+    if (connection) connection.release();
   }
 });
 
