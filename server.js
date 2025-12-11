@@ -122,67 +122,70 @@ app.delete('/api/equipments/:id', async (req, res) => {
 });
 
 // 2. 创建预订 (已完成数据库改造，包含事务)
+// --- 创建预订（适配现有表结构）---
 app.post('/api/bookings', async (req, res) => {
-  console.log('[API] /api/bookings - 收到预订请求', req.body);
-  const { equipment_id, user_name, booking_date } = req.body;
+  console.log('[API] /api/bookings - 收到请求:', req.body);
+  const { equipment_id, user_id, booking_date } = req.body;
 
-  if (!equipment_id || !user_name || !booking_date) {
-      console.warn('[API] /api/bookings - 缺少必要参数');
-      return res.status(400).json({ message: '缺少必要参数: equipment_id, user_name, booking_date' });
+  // 验证参数
+  if (!equipment_id || !user_id || !booking_date) {
+    return res.status(400).json({ 
+      message: '缺少必要参数: equipment_id, user_id, booking_date' 
+    });
+  }
+
+  // 验证日期格式（简单校验 YYYY-MM-DD）
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(booking_date)) {
+    return res.status(400).json({ message: '日期格式无效，应为 YYYY-MM-DD' });
   }
 
   let connection;
   try {
     connection = await pool.getConnection();
-    console.log('[API] /api/bookings - 已获取数据库连接');
-
     await connection.beginTransaction();
-    console.log('[API] /api/bookings - 开启数据库事务');
 
     // a. 检查设备是否存在且状态为 available
-    const [equipmentRows] = await connection.execute(
+    const [equipments] = await connection.execute(
       'SELECT id FROM equipments WHERE id = ? AND status = "available"',
       [equipment_id]
     );
-
-    if (equipmentRows.length === 0) {
+    if (equipments.length === 0) {
       await connection.rollback();
-      console.log('[API] /api/bookings - 设备不可用或不存在，事务回滚');
       return res.status(400).json({ message: '设备不可用或不存在' });
     }
 
-    // b. 插入预订记录
-    const [result] = await connection.execute(
-      'INSERT INTO bookings (equipment_id, user_name, booking_date) VALUES (?, ?, ?)',
-      [equipment_id, user_name, booking_date]
+    // b. 检查该设备在选定日期是否已被预订
+    const [existingBookings] = await connection.execute(
+      'SELECT id FROM bookings WHERE equipment_id = ? AND booking_date = ?',
+      [equipment_id, booking_date]
     );
-    const bookingId = result.insertId;
-    console.log(`[API] /api/bookings - 预订记录创建成功, ID: ${bookingId}`);
+    if (existingBookings.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: '该设备在选定日期已被预约' });
+    }
 
-    // c. 更新设备状态为 booked
+    // c. 插入新预订（user_id 是整数，booking_date 是 DATE）
+    const [result] = await connection.execute(
+      'INSERT INTO bookings (equipment_id, user_id, booking_date) VALUES (?, ?, ?)',
+      [equipment_id, user_id, booking_date]
+    );
+
+    // d. 更新设备状态为 booked（注意：只要有一天被订，设备就变成 booked？）
+    //    这可能不合理！但当前逻辑先这样处理。
     await connection.execute(
       'UPDATE equipments SET status = "booked" WHERE id = ?',
       [equipment_id]
     );
-    console.log(`[API] /api/bookings - 设备 ID ${equipment_id} 状态更新为 booked`);
 
     await connection.commit();
-    console.log('[API] /api/bookings - 数据库事务提交成功');
-
-    res.status(201).json({ message: '预订成功', bookingId: bookingId });
+    res.status(201).json({ message: '预约成功', bookingId: result.insertId });
 
   } catch (err) {
-    if (connection) {
-      await connection.rollback();
-      console.log('[API] /api/bookings - 发生错误，事务已回滚');
-    }
-    console.error("[API] /api/bookings - 预订失败:", err);
-    res.status(500).json({ message: '服务器内部错误，预订失败' });
+    if (connection) await connection.rollback();
+    console.error('[API] /api/bookings - 失败:', err);
+    res.status(500).json({ message: '服务器内部错误' });
   } finally {
-    if (connection) {
-      connection.release();
-      console.log('[API] /api/bookings - 数据库连接已释放');
-    }
+    if (connection) connection.release();
   }
 });
 
