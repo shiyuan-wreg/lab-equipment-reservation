@@ -187,22 +187,47 @@ app.post('/api/bookings', async (req, res) => {
 });
 
 // 3. 获取所有预订 (新增数据库支持)
+// --- 获取预订列表（支持按 user_id 过滤）---
 app.get('/api/bookings', async (req, res) => {
-  console.log('[API] /api/bookings - 请求获取所有预订');
+  console.log('[API] GET /api/bookings - 查询参数:', req.query);
+  
   try {
-     // 使用 JOIN 查询获取预订信息及关联的设备名称
-     const query = `
-      SELECT b.id, b.equipment_id, e.name as equipment_name, b.user_name, b.booking_date, b.created_at
-      FROM bookings b
-      JOIN equipments e ON b.equipment_id = e.id
-      ORDER BY b.created_at DESC
-    `;
-    const [rows] = await pool.execute(query);
-    console.log(`[API] /api/bookings - 成功查询到 ${rows.length} 条记录`);
+    let query = '';
+    let params = [];
+
+    if (req.query.user_id) {
+      // 只允许查询自己的预订（简单防护）
+      const userId = parseInt(req.query.user_id, 10);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: '无效的用户ID' });
+      }
+      query = `
+        SELECT b.id, b.equipment_id, b.start_time, b.end_time, b.purpose, 
+               e.name AS equipment_name, u.username AS user_name
+        FROM bookings b
+        JOIN equipments e ON b.equipment_id = e.id
+        JOIN users u ON b.user_id = u.id
+        WHERE b.user_id = ?
+        ORDER BY b.start_time DESC
+      `;
+      params = [userId];
+    } else {
+      // 管理员查看所有（未来可加权限判断）
+      query = `
+        SELECT b.id, b.equipment_id, b.start_time, b.end_time, b.purpose,
+               e.name AS equipment_name, u.username AS user_name
+        FROM bookings b
+        JOIN equipments e ON b.equipment_id = e.id
+        JOIN users u ON b.user_id = u.id
+        ORDER BY b.start_time DESC
+      `;
+    }
+
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
   } catch (err) {
-    console.error("[API] /api/bookings - 查询失败:", err);
-    res.status(500).json({ message: '服务器内部错误，无法获取预订列表' });
+    console.error('[API] /api/bookings GET 失败:', err);
+    res.status(500).json({ message: '服务器内部错误' });
   }
 });
 
