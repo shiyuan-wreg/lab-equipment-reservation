@@ -14,7 +14,7 @@ app.use(express.json());
 
 // --- API 路由 ---
 
-// 1. 获取所有设备 (已完成数据库改造)
+// 1. 获取所有设备
 app.get('/api/equipments', async (req, res) => {
   console.log('[API] /api/equipments - 请求获取所有设备');
   try {
@@ -27,6 +27,59 @@ app.get('/api/equipments', async (req, res) => {
   }
 });
 
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password } = req.body;
+
+  // 参数校验
+  if (!username || !password) {
+    return res.status(400).json({ message: '用户名和密码不能为空' });
+  }
+  if (username.length < 3 || username.length > 30) {
+    return res.status(400).json({ message: '用户名长度需在 3-30 个字符之间' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ message: '密码长度至少 6 位' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+
+    // 检查用户名是否已存在
+    const [existingUsers] = await connection.execute(
+      'SELECT id FROM users WHERE username = ?',
+      [username]
+    );
+    if (existingUsers.length > 0) {
+      return res.status(409).json({ message: '用户名已存在' });
+    }
+
+    // 密码加密
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // 插入新用户（默认 role = 'user'）
+    const [result] = await connection.execute(
+      'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+      [username, passwordHash, 'user']
+    );
+
+    const userId = result.insertId;
+    console.log(`[API] 新用户注册成功: ID=${userId}, Username=${username}`);
+
+    // 可选：注册后自动登录（返回用户信息）
+    res.status(201).json({
+      message: '注册成功',
+      user: { id: userId, username, role: 'user' }
+    });
+
+  } catch (err) {
+    console.error('[API] /api/auth/register 失败:', err);
+    res.status(500).json({ message: '服务器内部错误，注册失败' });
+  } finally {
+    if (connection) connection.release();
+  }
+});
 
 //管理员创建新设备
 app.post('/api/equipments', async (req, res) => {
@@ -300,7 +353,7 @@ app.delete('/api/bookings/:id', async (req, res) => {
   }
 });
 
-// --- 新增：用户登录接口 ---
+//用户登录接口
 app.post('/api/auth/login', async (req, res) => {
   console.log('[API] POST /api/auth/login - 收到登录请求');
   const { username, password } = req.body;
